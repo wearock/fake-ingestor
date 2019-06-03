@@ -18,6 +18,9 @@ import com.wearock.fakeingestor.models.uploadws.*;
 import com.wearock.fakeingestor.Utils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
+import org.dom4j.Document;
+import org.dom4j.Element;
+import org.dom4j.io.SAXReader;
 
 @WebService(targetNamespace = "http://upload.sesamecommunications.com", name = "Upload", serviceName = "Upload")
 public class Upload {
@@ -44,9 +47,25 @@ public class Upload {
                           @WebParam(name="uploadId") String uploadId){
 
         SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss");
-        String filename = authToken + "\\" + df.format(new Date()) + ".xml.gz";
 
-        receiveFile(filename);
+        File curDirectory = new File("");
+        String pkgPath = String.format("%s\\data\\upload\\%s\\%s.xml.gz", curDirectory.getAbsolutePath(), authToken, df.format(new Date()));
+        pkgPath = pkgPath.replace("\\", File.separator);
+        String unzipPath = String.format("%s\\data\\upload\\%s\\%s.xml", curDirectory.getAbsolutePath(), authToken, df.format(new Date()));
+        unzipPath = unzipPath.replace("\\", File.separator);
+        Utils.mkDirs(pkgPath);
+
+        receiveFile(pkgPath);
+
+        // Unzip the package to retrieve uploadId
+        Utils.gzipDecompress(pkgPath, unzipPath);
+        saveToCache(unzipPath);
+
+        try {
+            FileUtils.forceDelete(new File(unzipPath));
+        } catch (IOException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
     }
 
     @WebMethod(operationName="getUploadXMLStatus")
@@ -81,7 +100,18 @@ public class Upload {
     @WebMethod(action = "getLastSuccessfulUploadId")
     @WebResult(name = "uploadId")
     public String getLastSuccessfulUploadId(@XmlElement(required = true) @WebParam(name="authToken") String authToken) {
-        return "1";
+        File curDirectory = new File("");
+        String cachePath = (curDirectory.getAbsolutePath() + "\\data\\cache\\" + authToken).replace("\\", File.separator);
+        String uploadId = "";
+        try {
+            File cacheFile = new File(cachePath);
+            if (cacheFile.exists()) {
+                uploadId = FileUtils.readFileToString(cacheFile);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+        return uploadId;
     }
 
     @WebMethod(operationName="updateConfiguration")
@@ -166,21 +196,18 @@ public class Upload {
         return Collections.emptyList();
     }
 
-    private void receiveFile(String filename){
+    private void receiveFile(String pkgPath){
         uploadStatus = UploadStatusEnum.SUCCESSFUL;
         System.out.println("Receive file...");
         InputStream dataStream = null;
         OutputStream outputStream = null;
-        File curDirectory = new File("");
-        String filepath = (curDirectory.getAbsolutePath() + "\\data\\upload\\" + filename).replace("\\", File.separator);
-        Utils.mkDirs(filepath);
         try {
             final DataHandler dataHandler = getDataHandler();
             dataStream = dataHandler.getInputStream();
-            outputStream = new FileOutputStream(filepath);
+            outputStream = new FileOutputStream(pkgPath);
             IOUtils.copy(dataStream, outputStream);
             outputStream.flush();
-            System.out.println("Output file: " + filepath);
+            System.out.println("Output file: " + pkgPath);
         } catch (Exception e) {
             uploadStatus = UploadStatusEnum.FAILED;
             System.out.println("Couldn't store attached file.");
@@ -199,5 +226,37 @@ public class Upload {
             throw new Exception("Attachment with file not found.");
         }
         return attachments.get(attachments.keySet().iterator().next());
+    }
+
+    private void saveToCache(String fileName) {
+        try {
+            SAXReader saxReader = new SAXReader();
+            Document doc = saxReader.read(new File(fileName));
+
+            Element ePortionDate = (Element) doc.selectSingleNode("//service_information/portion_date");
+            String portionDate = ePortionDate.getStringValue();
+            portionDate = portionDate.replace('T', '_');
+            portionDate = portionDate.replace(':', '_');
+            portionDate = portionDate.replace('.', '_');
+
+            Element eUserName = (Element) doc.selectSingleNode("//service_information/username");
+            String userName = eUserName.getStringValue();
+
+            String uploadId = String.format("%s_%s", userName, portionDate);
+            System.out.println("Save to cache: " + uploadId);
+
+            File curDirectory = new File("");
+            String cachePath = (curDirectory.getAbsolutePath() + "\\data\\cache\\" + userName).replace("\\", File.separator);
+            Utils.mkDirs(cachePath);
+
+            File cacheFile = new File(cachePath);
+            cacheFile.createNewFile();
+            FileWriter writer = new FileWriter(cacheFile);
+            writer.write(uploadId);
+            writer.flush();
+            writer.close();
+        } catch (Exception de) {
+            throw new RuntimeException(de.getMessage(), de);
+        }
     }
 }

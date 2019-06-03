@@ -3,11 +3,11 @@ package com.wearock.fakeingestor;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
-import java.io.File;
-import java.io.StringWriter;
+import java.io.*;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 public class Utils {
     private static final Map<Class<?>, JAXBContext> contextCache = Collections
@@ -43,6 +43,23 @@ public class Utils {
             m.marshal(object, writer);
             return writer.toString();
         } catch (JAXBException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public static void gzipDecompress(String gzipFile, String newFile) {
+        try {
+            FileInputStream fis = new FileInputStream(gzipFile);
+            GZIPInputStream gis = new GZIPInputStream(fis);
+            FileOutputStream fos = new FileOutputStream(newFile);
+            byte[] buffer = new byte[1024];
+            int len;
+            while((len = gis.read(buffer)) != -1) {
+                fos.write(buffer, 0, len);
+            }
+            fos.close();
+            gis.close();
+        } catch (IOException e) {
             throw new RuntimeException(e.getMessage(), e);
         }
     }
